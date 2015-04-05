@@ -18,7 +18,7 @@ usage(char *prog) {
             "  -i <n>        : select <n>th one if -d option is ambigious\n"
             "  -c <config>   : set SPI configuration (below)\n"
             "\n"
-            "SPI config example: -c 100000:8:M:110000\n"
+            "Default SPI config: -c " DEFAULT_CONFIG "\n"
             "                       ^^^^^^frequency-in-HZ\n"
             "                              ^data width in bits (4-16)\n"
             "                                ^M(otorola), T(I), or N(S)\n"
@@ -202,7 +202,7 @@ parse_args(struct app_ctx *ctx, int argc, char **argv) {
     ctx->opt.vid = DEFAULT_VID;
     ctx->opt.pid = DEFAULT_PID;
     ctx->opt.index = 0;
-    ctx->opt.config = "100000:8:M:110000";
+    ctx->opt.config = DEFAULT_CONFIG;
 
     int opt;
     while ((opt = getopt(argc, argv, "hvd:i:c:")) != -1) {
@@ -264,31 +264,45 @@ run(struct app_ctx *ctx, int argc, char **argv) {
         int      blen = 0;
         uint64_t bval;
 
+        // read bitvec value
         if (strncmp(arg, "0b", 2) == 0) {
             blen = strlen(arg + 2);
-            bval = strtoull(arg + 2, NULL, 2);
+            bval = strtoull(arg + 2, &arg, 2);
         }
         else if (strncmp(arg, "0x", 2) == 0) {
             blen = strlen(arg + 2) << 2;
-            bval = strtoull(arg, NULL, 16);
+            bval = strtoull(arg, &arg, 16);
         }
         else {
-            die("Unsupported value format: %s\n", arg);
+            bval = strtoull(arg, &arg, 0);
+            blen = ((bval <=       0xFF) ?  8 :
+                    (bval <=     0xFFFF) ? 16 :
+                    (bval <= 0xFFFFFFFF) ? 32 : 64);
+        }
+
+        // if given, read trailing bitvec length
+        if (*arg == ':') {
+            blen = strtol(arg + 1, NULL, 0);
         }
 
         if (bpos + blen > bitlen) {
             die("Bit length too short for given value(s): %d\n", bitlen);
         }
 
-        // fill bitvec in MSbit-first order
+        // fill bits in MSByte-first + MSbit-first order
         while (blen--) {
             if (bval & (1 << blen)) {
-                bit_set(wbuf, bitlen - 1 - bpos++);
+                bit_set(wbuf, bpos++);
             }
             else {
-                bit_clr(wbuf, bitlen - 1 - bpos++);
+                bit_clr(wbuf, bpos++);
             }
         }
+    }
+
+    // bit reverse each BYTE to make it MSByte-first + LSbit-first order
+    for (int i = 0; i < buflen; i++) {
+        wbuf[i] = bit_rev(wbuf[i]);
     }
 
     log("send: 0b");

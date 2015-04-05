@@ -16,6 +16,8 @@
 #define DEFAULT_VID 0x04B4
 #define DEFAULT_PID 0x0004
 
+#define DEFAULT_CONFIG "100000:8:M:111000"
+
 #define log(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
 #define die(...) do { log(__VA_ARGS__); exit(1); } while (0)
 
@@ -42,6 +44,14 @@ bit_clr(uint8_t *vec, unsigned int i) {
 static inline bool
 bit_get(uint8_t *vec, unsigned int i) {
     return !!(vec[i >> 3] & (1 << (i & 7)));
+}
+
+static inline uint8_t
+bit_rev(uint8_t b) {
+    b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+    b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+    b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+    return b;
 }
 
 struct app_opt {
