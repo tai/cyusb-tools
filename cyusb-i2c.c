@@ -16,13 +16,32 @@ usage(char *prog) {
             "  -v            : verbose output\n"
             "  -d <vid>:<pid>: select USB target by vendor and product ID\n"
             "  -i <n>        : select <n>th one if -d option is ambigious\n"
-            "  -f <hz>       : set I2C clock speed\n");
+            "  -f <config>   : set I2C configuration\n"
+            "  -c <config>   : set data I2C configuration\n"
+            "\n"
+            "Default I2C config: -f " DEFAULT_CONFIG "\n"
+            "                       ^^^^^^frequency\n"
+            "                              ^^^^slave-mode address\n"
+            "                                   ^isMaster\n"
+            "                                    ^isClockStretch\n"
+            "Default I2C data config: -c " DEFAULT_DATA_CONFIG "\n"
+            "                            ^^^^slave address\n"
+            "                                 ^isStopBit\n"
+            "                                  ^isNakBit\n");
     fprintf(stderr,
             "Example:\n"
             "  $ %s r 2          # read 2 bytes\n", p);
     fprintf(stderr,
             "  $ %s w 0x12 0x34  # send 2 bytes\n", p);
     exit(1);
+}
+
+// Under some configuration, mingw does not define strdup(3).
+char *
+my_strdup(const char *src) {
+    int len = strlen(src) + 1;
+    char *tmp = malloc(len);
+    return memcpy(tmp, src, len);
 }
 
 char *
@@ -137,6 +156,41 @@ scan_device(void (*scan)(CY_DEVICE_INFO *, void *), void *data) {
 }
 
 int
+parse_i2c_config(const char *spec, CY_I2C_CONFIG *config) {
+    char *ep;
+
+    config->frequency = strtoul(spec, &ep, 10);
+
+    if (*ep++ != ':') {
+        return 0;
+    }
+
+    config->slaveAddress = strtoul(ep, &ep, 0);
+
+    if (*ep++ != ':') {
+        return 0;
+    }
+
+    config->isMaster       = (*ep++ == '1');
+    config->isClockStretch = (*ep++ == '1');
+
+    return 0;
+}
+
+int
+parse_i2c_data_config(const char *spec, CY_I2C_DATA_CONFIG *dc) {
+    char *ep;
+
+    dc->slaveAddress = strtoul(spec, &ep, 0);
+    ep++;
+
+    dc->isStopBit = (*ep++ == '1');
+    dc->isNakBit  = (*ep++ == '1');
+
+    return 0;
+}
+
+int
 parse_args(struct app_ctx *ctx, int argc, char **argv) {
 
     if (argc <= 1) {
@@ -147,10 +201,11 @@ parse_args(struct app_ctx *ctx, int argc, char **argv) {
     ctx->opt.vid = DEFAULT_VID;
     ctx->opt.pid = DEFAULT_PID;
     ctx->opt.index = 0;
-    ctx->opt.freq = 100000;
+    ctx->opt.config = DEFAULT_CONFIG;
+    ctx->opt.data_config = DEFAULT_DATA_CONFIG;
 
     int opt;
-    while ((opt = getopt(argc, argv, "hvd:i:f:")) != -1) {
+    while ((opt = getopt(argc, argv, "hvd:i:f:c:")) != -1) {
         switch (opt) {
         case 'h':
             usage(argv[0]);
@@ -168,11 +223,22 @@ parse_args(struct app_ctx *ctx, int argc, char **argv) {
             ctx->opt.index = atoi(optarg);
             break;
         case 'f':
-            ctx->opt.freq = strtoul(optarg, NULL, 10);
+            ctx->opt.config = my_strdup(optarg);
+            break;
+        case 'c':
+            ctx->opt.data_config = my_strdup(optarg);
             break;
         default:
             usage(argv[0]);
         }
+    }
+
+    if (parse_i2c_config(ctx->opt.config, &ctx->config) != 0) {
+        usage(argv[0]);
+    }
+
+    if (parse_i2c_data_config(ctx->opt.data_config, &ctx->data_config) != 0) {
+        usage(argv[0]);
     }
 
     return optind;
@@ -180,12 +246,7 @@ parse_args(struct app_ctx *ctx, int argc, char **argv) {
 
 void
 run(struct app_ctx *ctx, int argc, char **argv) {
-    CY_I2C_CONFIG cfg;
-
-    DO(CyGetI2cConfig, ctx->handle, &cfg);
-    cfg.frequency = ctx->opt.freq;
-    cfg.isMaster  = true;
-    DO(CySetI2cConfig, ctx->handle, &cfg);
+    DO(CySetI2cConfig, ctx->handle, &ctx->config);
 
     uint8_t buf[8];
 
@@ -195,19 +256,13 @@ run(struct app_ctx *ctx, int argc, char **argv) {
         .transferCount = 0,
     };
 
-    CY_I2C_DATA_CONFIG dc = {
-        .slaveAddress = 0x10,
-        .isStopBit    = false,
-        .isNakBit     = false,
-    };
-
     if (! argc) return;
 
     // Usage: cyusb-i2c r 2
     if (strcmp(argv[0], "r") == 0) {
         db.length        = atoi(argv[1]);
         db.transferCount = 0;
-        DO(CyI2cRead, ctx->handle, &dc, &db, 1000);
+        DO(CyI2cRead, ctx->handle, &ctx->data_config, &db, 1000);
 
         log("recv:");
         for (int i = 0; i < db.transferCount; i++) {
@@ -223,7 +278,7 @@ run(struct app_ctx *ctx, int argc, char **argv) {
         }
         db.length        = argc - 1;
         db.transferCount = 0;
-        DO(CyI2cWrite, ctx->handle, &dc, &db, 1000);
+        DO(CyI2cWrite, ctx->handle, &ctx->data_config, &db, 1000);
         log("sent: %d bytes\n", db.transferCount);
     }
 }

@@ -16,6 +16,9 @@
 #define DEFAULT_VID 0x04B4
 #define DEFAULT_PID 0x0004
 
+#define DEFAULT_CONFIG "100000:0x10:10"
+#define DEFAULT_DATA_CONFIG "0x10:00"
+
 #define log(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
 #define die(...) do { log(__VA_ARGS__); exit(1); } while (0)
 
@@ -33,7 +36,8 @@ struct app_opt {
     int verbose;
     int vid, pid;
     int index;
-    uint32_t freq;
+    char *config;
+    char *data_config;
 };
 
 struct app_ctx {
@@ -46,6 +50,8 @@ struct app_ctx {
     } selected;
 
     CY_HANDLE handle;
+    CY_I2C_CONFIG config;
+    CY_I2C_DATA_CONFIG data_config;
 };
 
 extern char *
